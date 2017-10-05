@@ -1,0 +1,3 @@
+/home/jon/Downloads/cs324/shell/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/jon/Downloads/cs324/shell/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/home/jon/Downloads/cs324/shell/cmake-build-debug/CMakeFiles/shell.dir
