@@ -1,6 +1,6 @@
 # Makefile for the CS:APP Shell Lab
 
-BYUNETID = NOBODY
+BYUNETID = jmeng2
 VERSION = 1
 HANDINDIR = /users/faculty/snell/CS324/handin/Fall2017/Shell
 DRIVER = ./sdriver.pl
