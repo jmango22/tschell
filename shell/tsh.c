@@ -258,9 +258,55 @@ int parseline(const char *cmdline, char **argv)
  */
 int builtin_cmd(char **argv) 
 {
+    // The quit command terminates the shell
     if(strcmp(argv[0], "quit") == 0) {
         exit(0);
     }
+
+    // The jobs command lists all background jobs.
+    // Need to make sure that the output is correct
+    if(strcmp(argv[0], "jobs") == 0) {
+        int i;
+
+        for (i = 0; i < MAXJOBS; i++) {
+            if (jobs[i].pid != 0) {
+                printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
+                switch (jobs[i].state) {
+                    case BG:
+                        printf("Running ");
+                        break;
+                    default:
+                        printf("listjobs: Internal error: job[%d].state=%d ",
+                               i, jobs[i].state);
+                }
+                printf("%s", jobs[i].cmdline);
+            }
+        }
+    }
+
+    // The bg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
+    // the background. The <job> argument can be either a PID or a JID
+    if(strcmp(argv[0], "bg") == 0) {
+        if(arvc > 1) {
+            int some_id = argv[1];
+
+            // Restart the process in the background
+        }
+
+    }
+
+    // The fg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
+    // the foreground. The <job> argument can be either a PID or a JID
+
+    if(strcmp(argv[0], "fg") == 0) {
+        if(arvc > 1) {
+            int some_id = argv[1];
+
+            // Restart the process in the background
+        }
+
+    }
+
     return 0;     /* not a builtin command */
 }
 
@@ -298,7 +344,7 @@ void sigchld_handler(int sig)
 }
 
 /* 
- * sigint_handler - The kernel sends a SIGINT to the shell whenver the
+ * sigint_handler - The kernel sends a SIGINT to the shell whenever the
  *    user types ctrl-c at the keyboard.  Catch it and send it along
  *    to the foreground job.  
  */
