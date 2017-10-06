@@ -202,7 +202,7 @@ void eval(char *cmdline)
         if (!bg) {
             waitfg(pid);
         } else {
-            printf("%d %s", pid, cmdline);
+            printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
         }
     }
     return;
@@ -231,27 +231,27 @@ int parseline(const char *cmdline, char **argv)
     /* Build the argv list */
     argc = 0;
     if (*buf == '\'') {
-	buf++;
-	delim = strchr(buf, '\'');
+	    buf++;
+	    delim = strchr(buf, '\'');
     }
     else {
-	delim = strchr(buf, ' ');
+	    delim = strchr(buf, ' ');
     }
 
     while (delim) {
-	argv[argc++] = buf;
-	*delim = '\0';
-	buf = delim + 1;
-	while (*buf && (*buf == ' ')) /* ignore spaces */
-	       buf++;
+	    argv[argc++] = buf;
+	    *delim = '\0';
+	    buf = delim + 1;
+	    while (*buf && (*buf == ' ')) /* ignore spaces */
+	        buf++;
 
-	if (*buf == '\'') {
-	    buf++;
-	    delim = strchr(buf, '\'');
-	}
-	else {
-	    delim = strchr(buf, ' ');
-	}
+        if (*buf == '\'') {
+            buf++;
+            delim = strchr(buf, '\'');
+        }
+        else {
+            delim = strchr(buf, ' ');
+        }
     }
     argv[argc] = NULL;
     
@@ -260,7 +260,7 @@ int parseline(const char *cmdline, char **argv)
 
     /* should the job run in the background? */
     if ((bg = (*argv[argc-1] == '&')) != 0) {
-	argv[--argc] = NULL;
+	    argv[--argc] = NULL;
     }
     return bg;
 }
@@ -283,7 +283,11 @@ int builtin_cmd(char **argv)
             if (jobs[i].pid != 0) {
                 printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
                 if (jobs[i].state == BG) {
-                    printf("Running ");
+                    printf("Running\t");
+                    printf("%s", jobs[i].cmdline);
+                }
+                if (jobs[i].state == ST) {
+                    printf("Stopped\t");
                     printf("%s", jobs[i].cmdline);
                 }
             }
@@ -313,7 +317,40 @@ int builtin_cmd(char **argv)
  */
 void do_bgfg(char **argv) 
 {
+    struct job_t *job = NULL;
 
+    if(argv[1] != NULL) {
+        int id = atoi(argv[1]);
+        job = getjobjid(jobs, id);
+        if (job == NULL) {
+            pid_t pid = id;
+            job = getjobpid(jobs, pid);
+        }
+
+        if (job != NULL) {
+            // Bits to mask
+            sigset_t mask_all, prev_all;
+
+            // Mask bits
+            sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+
+            if (strcmp(argv[0], "fg")) {
+                printf("Foreground called...");
+                job->state = FG;
+                kill(job->pid, SIGCONT);
+
+                waitfg(job->pid);
+            }
+
+            if (strcmp(argv[0], "bg")) {
+                job->state = BG;
+                kill(job->pid, SIGCONT);
+            }
+
+            // Unmask the bits
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        }
+    }
     return;
 }
 
