@@ -101,18 +101,18 @@ int main(int argc, char **argv)
     /* Parse the command line */
     while ((c = getopt(argc, argv, "hvp")) != EOF) {
         switch (c) {
-        case 'h':             /* print help message */
-            usage();
-	    break;
-        case 'v':             /* emit additional diagnostic info */
-            verbose = 1;
-	    break;
-        case 'p':             /* don't print a prompt */
-            emit_prompt = 0;  /* handy for automatic testing */
-	    break;
-	default:
-            usage();
-	}
+            case 'h':             /* print help message */
+                usage();
+	            break;
+            case 'v':             /* emit additional diagnostic info */
+                verbose = 1;
+	            break;
+            case 'p':             /* don't print a prompt */
+                emit_prompt = 0;  /* handy for automatic testing */
+	            break;
+	        default:
+                usage();
+        }
     }
 
     /* Install the signal handlers */
@@ -168,29 +168,35 @@ void eval(char *cmdline)
     char *argv[MAXARGS]; /* Argument list execve() */
     char buf[MAXLINE];   /* Holds modified command line */
     int bg;              /* Should the job run in bg or fg? */
+
     pid_t pid;           /* Process id */
+    sigset_t mask_all, mask_one, prev_one; /* Signal Bits to Block */
 
     strcpy(buf, cmdline);
     bg = parseline(buf, argv);
     if (argv[0] == NULL)
         return;   /* Ignore empty lines */
 
+    //Block the bits and add the command
     if (!builtin_cmd(argv)) {
+        sigprocmask(SIG_BLOCK, &mask_one, &prev_one); /* Block SIGCHLD */
         if ((pid = fork()) == 0) {   /* Child runs user job */
-            if (execve(argv[0], argv, environ) < 0) {
+            sigprocmask(SIG_SETMASK, &prev_one, NULL); /* Unblock SIGCHLD */
+            if (execv(argv[0], argv) < 0) {
                 printf("%s: Command not found.\n", argv[0]);
                 exit(0);
             }
         }
+        sigprocmask(SIG_BLOCK, &mask_all, NULL); /* Parent process */
+        addjob(jobs, pid, bg, buf);
+        sigprocmask(SIG_SETMASK, &prev_one, NULL); /* Unblock SIGCHLD */
 
         /* Parent waits for foreground job to terminate */
         if (!bg) {
-            int status;
-            if (waitpid(pid, &status, 0) < 0)
-                unix_error("waitfg: waitpid error");
-        }
-        else
+            waitfg(pid);
+        } else {
             printf("%d %s", pid, cmdline);
+        }
     }
     return;
 }
@@ -287,23 +293,18 @@ int builtin_cmd(char **argv)
     // The bg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
     // the background. The <job> argument can be either a PID or a JID
     if(strcmp(argv[0], "bg") == 0) {
-        if(arvc > 1) {
-            int some_id = argv[1];
+            //char *some_id = argv[1];
 
             // Restart the process in the background
-        }
-
     }
 
     // The fg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
     // the foreground. The <job> argument can be either a PID or a JID
 
     if(strcmp(argv[0], "fg") == 0) {
-        if(arvc > 1) {
-            int some_id = argv[1];
+            //char some_id* = argv[1];
 
             // Restart the process in the background
-        }
 
     }
 
@@ -324,6 +325,9 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
+    while(getjobpid(jobs, pid) != NULL) {
+        sleep(1);
+    }
     return;
 }
 
@@ -340,6 +344,30 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
+    int pid;
+    int status;
+
+    // Bits to mask
+    sigset_t mask_all, prev_all;
+
+    // Mask the bits until the signal is handled
+    sigfillset(&mask_all);
+
+    pid = waitpid(-1, &status, WNOHANG | WUNTRACED);
+
+    if(WIFEXITED(status)) {
+        sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+        deletejob(jobs, pid);
+        sigprocmask(SIG_SETMASK, &prev_all, NULL);
+    }
+
+    if(WIFSIGNALED(status)) {
+        printf("Ctrl-C Pressed");
+    }
+
+    if(WIFSTOPPED(status)) {
+        printf("Ctrl-Z Pressed");
+    }
     return;
 }
 
