@@ -182,13 +182,20 @@ void eval(char *cmdline)
         sigprocmask(SIG_BLOCK, &mask_one, &prev_one); /* Block SIGCHLD */
         if ((pid = fork()) == 0) {   /* Child runs user job */
             sigprocmask(SIG_SETMASK, &prev_one, NULL); /* Unblock SIGCHLD */
+            setpgid(0, 0);
             if (execv(argv[0], argv) < 0) {
                 printf("%s: Command not found.\n", argv[0]);
                 exit(0);
             }
         }
         sigprocmask(SIG_BLOCK, &mask_all, NULL); /* Parent process */
-        addjob(jobs, pid, bg, buf);
+
+        // Quick check to make sure that the states are right
+        if(bg) {
+            addjob(jobs, pid, BG, buf);
+        } else {
+            addjob(jobs, pid, FG, buf);
+        }
         sigprocmask(SIG_SETMASK, &prev_one, NULL); /* Unblock SIGCHLD */
 
         /* Parent waits for foreground job to terminate */
@@ -272,40 +279,30 @@ int builtin_cmd(char **argv)
     // The jobs command lists all background jobs.
     // Need to make sure that the output is correct
     if(strcmp(argv[0], "jobs") == 0) {
-        int i;
-
-        for (i = 0; i < MAXJOBS; i++) {
+        for (int i = 0; i < MAXJOBS; i++) {
             if (jobs[i].pid != 0) {
                 printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
-                switch (jobs[i].state) {
-                    case BG:
-                        printf("Running ");
-                        break;
-                    default:
-                        printf("listjobs: Internal error: job[%d].state=%d ",
-                               i, jobs[i].state);
+                if (jobs[i].state == BG) {
+                    printf("Running ");
+                    printf("%s", jobs[i].cmdline);
                 }
-                printf("%s", jobs[i].cmdline);
             }
         }
+        return 1;
     }
 
     // The bg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
     // the background. The <job> argument can be either a PID or a JID
     if(strcmp(argv[0], "bg") == 0) {
-            //char *some_id = argv[1];
-
-            // Restart the process in the background
+        do_bgfg(argv);
+        return 1;
     }
 
     // The fg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
     // the foreground. The <job> argument can be either a PID or a JID
-
     if(strcmp(argv[0], "fg") == 0) {
-            //char some_id* = argv[1];
-
-            // Restart the process in the background
-
+        do_bgfg(argv);
+        return 1;
     }
 
     return 0;     /* not a builtin command */
@@ -325,7 +322,9 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-    while(getjobpid(jobs, pid) != NULL) {
+    struct job_t *fg_job = getjobpid(jobs, pid);
+
+    while((fg_job != NULL) && (fg_job->state == FG)) {
         sleep(1);
     }
     return;
@@ -361,13 +360,6 @@ void sigchld_handler(int sig)
         sigprocmask(SIG_SETMASK, &prev_all, NULL);
     }
 
-    if(WIFSIGNALED(status)) {
-        printf("Ctrl-C Pressed");
-    }
-
-    if(WIFSTOPPED(status)) {
-        printf("Ctrl-Z Pressed");
-    }
     return;
 }
 
@@ -378,6 +370,22 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
+    // Bits to mask
+    sigset_t mask_all, prev_all;
+
+    // Mask the bits
+    sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+
+    // Find the right pid
+    pid_t fg_pid = fgpid(jobs);
+
+    if (fg_pid != 0) {
+        kill(fg_pid, sig);
+        deletejob(jobs, fg_pid);
+    }
+
+    // Unmask the bits
+    sigprocmask(SIG_SETMASK, &prev_all, NULL);
     return;
 }
 
@@ -388,6 +396,24 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
+    // Bits to mask
+    sigset_t mask_all, prev_all;
+
+    // Mask bits
+    sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
+
+    // Find the right pid
+    pid_t fg_pid = fgpid(jobs);
+
+    if (fg_pid != 0) {
+        kill(fg_pid, sig);
+
+        struct job_t *fg_job = getjobpid(jobs, fg_pid);
+        fg_job->state = ST;
+    }
+
+    // Unmask bits
+    sigprocmask(SIG_SETMASK, &prev_all, NULL);
     return;
 }
 
