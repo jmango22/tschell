@@ -192,9 +192,9 @@ void eval(char *cmdline)
 
         // Quick check to make sure that the states are right
         if(bg) {
-            addjob(jobs, pid, BG, buf);
+            addjob(jobs, pid, BG, cmdline);
         } else {
-            addjob(jobs, pid, FG, buf);
+            addjob(jobs, pid, FG, cmdline);
         }
         sigprocmask(SIG_SETMASK, &prev_one, NULL); /* Unblock SIGCHLD */
 
@@ -283,11 +283,11 @@ int builtin_cmd(char **argv)
             if (jobs[i].pid != 0) {
                 printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
                 if (jobs[i].state == BG) {
-                    printf("Running\t");
+                    printf("Running ");
                     printf("%s", jobs[i].cmdline);
                 }
                 if (jobs[i].state == ST) {
-                    printf("Stopped\t");
+                    printf("Stopped ");
                     printf("%s", jobs[i].cmdline);
                 }
             }
@@ -319,6 +319,16 @@ void do_bgfg(char **argv)
 {
     struct job_t *job = NULL;
 
+    // Remove invalid characters from the command
+    char* str_id = argv[1];
+    while(*str_id)
+    {
+        if(!isdigit(*str_id))
+            *str_id = ' ';
+
+        str_id++;
+    }
+
     if(argv[1] != NULL) {
         int id = atoi(argv[1]);
         job = getjobjid(jobs, id);
@@ -334,17 +344,16 @@ void do_bgfg(char **argv)
             // Mask bits
             sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
 
-            if (strcmp(argv[0], "fg")) {
-                printf("Foreground called...");
+            if (strcmp(argv[0], "fg") == 0) {
                 job->state = FG;
                 kill(job->pid, SIGCONT);
-
                 waitfg(job->pid);
             }
 
-            if (strcmp(argv[0], "bg")) {
+            if (strcmp(argv[0], "bg") == 0) {
                 job->state = BG;
                 kill(job->pid, SIGCONT);
+                printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
             }
 
             // Unmask the bits
@@ -390,11 +399,17 @@ void sigchld_handler(int sig)
     sigfillset(&mask_all);
 
     pid = waitpid(-1, &status, WNOHANG | WUNTRACED);
+    int jid = getjobpid(jobs, pid)->jid;
 
     if(WIFEXITED(status)) {
         sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
         deletejob(jobs, pid);
         sigprocmask(SIG_SETMASK, &prev_all, NULL);
+    }
+
+    if(WIFSIGNALED(status)) {
+        int signal_num = WTERMSIG(status);
+        printf("Job [%d] (%d) terminated by signal %d", jid, pid, signal_num);
     }
 
     return;
@@ -416,9 +431,13 @@ void sigint_handler(int sig)
     // Find the right pid
     pid_t fg_pid = fgpid(jobs);
 
+    struct job_t *job = getjobpid(jobs, fg_pid);
+    int jid = job->jid;
+
     if (fg_pid != 0) {
         kill(fg_pid, sig);
         deletejob(jobs, fg_pid);
+        printf("Job [%d] (%d) terminated by signal 2\n", jid, fg_pid);
     }
 
     // Unmask the bits
@@ -447,6 +466,8 @@ void sigtstp_handler(int sig)
 
         struct job_t *fg_job = getjobpid(jobs, fg_pid);
         fg_job->state = ST;
+
+        printf("Job [%d] (%d) stopped by signal 18\n", fg_job->jid, fg_pid);
     }
 
     // Unmask bits
