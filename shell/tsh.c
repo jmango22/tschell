@@ -278,33 +278,14 @@ int builtin_cmd(char **argv)
 
     // The jobs command lists all background jobs.
     // Need to make sure that the output is correct
-    if(strcmp(argv[0], "jobs") == 0) {
-        for (int i = 0; i < MAXJOBS; i++) {
-            if (jobs[i].pid != 0) {
-                printf("[%d] (%d) ", jobs[i].jid, jobs[i].pid);
-                if (jobs[i].state == BG) {
-                    printf("Running ");
-                    printf("%s", jobs[i].cmdline);
-                }
-                if (jobs[i].state == ST) {
-                    printf("Stopped ");
-                    printf("%s", jobs[i].cmdline);
-                }
-            }
-        }
+    else if(strcmp(argv[0], "jobs") == 0) {
+        listjobs(jobs);
         return 1;
     }
 
     // The bg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
     // the background. The <job> argument can be either a PID or a JID
-    if(strcmp(argv[0], "bg") == 0) {
-        do_bgfg(argv);
-        return 1;
-    }
-
-    // The fg <job> command restarts <job> by sending it a SIGCONT signal, and then runs it in
-    // the foreground. The <job> argument can be either a PID or a JID
-    if(strcmp(argv[0], "fg") == 0) {
+    else if((strcmp(argv[0], "bg") == 0) || (strcmp(argv[0], "fg") == 0)) {
         do_bgfg(argv);
         return 1;
     }
@@ -312,55 +293,32 @@ int builtin_cmd(char **argv)
     return 0;     /* not a builtin command */
 }
 
-/* 
- * do_bgfg - Execute the builtin bg and fg commands
- */
-void do_bgfg(char **argv) 
-{
+void do_bgfg(char **argv) {
+    // The id may be a PID or a JID
     struct job_t *job = NULL;
+    char *id = argv[1];
 
-    // Remove invalid characters from the command
-    char* str_id = argv[1];
-    while(*str_id)
-    {
-        if(!isdigit(*str_id))
-            *str_id = ' ';
-
-        str_id++;
+    // If id is JID ELSE pid
+    if (id[0] == '%') {
+        int jid = atoi(&id[1]);
+        job = getjobjid(jobs, jid);
+    } else if (isdigit(id[0])) {
+        pid_t pid = atoi(id);
+        job = getjobpid(jobs, pid);
     }
 
-    if(argv[1] != NULL) {
-        int id = atoi(argv[1]);
-        job = getjobjid(jobs, id);
-        if (job == NULL) {
-            pid_t pid = id;
-            job = getjobpid(jobs, pid);
-        }
+    if (job != NULL) {
+        kill(-(job->pid), SIGCONT);
 
-        if (job != NULL) {
-            // Bits to mask
-            sigset_t mask_all, prev_all;
-
-            // Mask bits
-            sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
-
-            if (strcmp(argv[0], "fg") == 0) {
-                job->state = FG;
-                kill(job->pid, SIGCONT);
-                waitfg(job->pid);
-            }
-
-            if (strcmp(argv[0], "bg") == 0) {
-                job->state = BG;
-                kill(job->pid, SIGCONT);
-                printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
-            }
-
-            // Unmask the bits
-            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+        // To determine the bg and fg
+        if (!strcmp("fg", argv[0])) {
+            job->state = FG;
+            waitfg(job->pid);
+        } else if (!strcmp("bg", argv[0])) {
+            job->state = BG;
+            printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
         }
     }
-    return;
 }
 
 /* 
@@ -368,9 +326,9 @@ void do_bgfg(char **argv)
  */
 void waitfg(pid_t pid)
 {
-    struct job_t *fg_job = getjobpid(jobs, pid);
+    printf("HIT WAITING FUNCTION...\n");
 
-    while((fg_job != NULL) && (fg_job->state == FG)) {
+    while(pid == fgpid(jobs)) {
         sleep(1);
     }
     return;
@@ -389,27 +347,19 @@ void waitfg(pid_t pid)
  */
 void sigchld_handler(int sig) 
 {
-    int pid;
+    pid_t pid;
     int status;
 
-    // Bits to mask
-    sigset_t mask_all, prev_all;
-
-    // Mask the bits until the signal is handled
-    sigfillset(&mask_all);
-
     pid = waitpid(-1, &status, WNOHANG | WUNTRACED);
-    int jid = getjobpid(jobs, pid)->jid;
 
-    if(WIFEXITED(status)) {
-        sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
-        deletejob(jobs, pid);
-        sigprocmask(SIG_SETMASK, &prev_all, NULL);
+    if (WIFSTOPPED(status)) {
+        sigtstp_handler(sig);
+    } else if(WIFSIGNALED(status)) {
+        sigint_handler(sig);
     }
-
-    if(WIFSIGNALED(status)) {
-        int signal_num = WTERMSIG(status);
-        printf("Job [%d] (%d) terminated by signal %d", jid, pid, signal_num);
+    else if(WIFEXITED(status)) {
+        printf("HIT WIFEXITED DELETING ITEM...\n");
+        deletejob(jobs, pid);
     }
 
     return;
@@ -422,26 +372,23 @@ void sigchld_handler(int sig)
  */
 void sigint_handler(int sig) 
 {
-    // Bits to mask
-    sigset_t mask_all, prev_all;
-
-    // Mask the bits
-    sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
 
     // Find the right pid
     pid_t fg_pid = fgpid(jobs);
+
+    printf("fg_pid: %d\n", fg_pid);
 
     struct job_t *job = getjobpid(jobs, fg_pid);
     int jid = job->jid;
 
     if (fg_pid != 0) {
-        kill(fg_pid, sig);
-        deletejob(jobs, fg_pid);
-        printf("Job [%d] (%d) terminated by signal 2\n", jid, fg_pid);
+        kill(-(fg_pid), sig);
+        if (sig < 3) {
+            printf("Job [%d] (%d) terminated by signal %d\n", jid, fg_pid, sig);
+            deletejob(jobs, fg_pid);
+        }
     }
 
-    // Unmask the bits
-    sigprocmask(SIG_SETMASK, &prev_all, NULL);
     return;
 }
 
@@ -452,26 +399,18 @@ void sigint_handler(int sig)
  */
 void sigtstp_handler(int sig) 
 {
-    // Bits to mask
-    sigset_t mask_all, prev_all;
-
-    // Mask bits
-    sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
-
     // Find the right pid
     pid_t fg_pid = fgpid(jobs);
 
     if (fg_pid != 0) {
-        kill(fg_pid, sig);
+        kill(-(fg_pid), sig);
 
         struct job_t *fg_job = getjobpid(jobs, fg_pid);
         fg_job->state = ST;
 
-        printf("Job [%d] (%d) stopped by signal 18\n", fg_job->jid, fg_pid);
+        printf("Job [%d] (%d) stopped by signal %d\n", fg_job->jid, fg_pid, sig);
     }
 
-    // Unmask bits
-    sigprocmask(SIG_SETMASK, &prev_all, NULL);
     return;
 }
 
