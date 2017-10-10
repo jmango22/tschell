@@ -367,36 +367,17 @@ void sigchld_handler(int sig)
     sigset_t mask_all, prev_all;
 
     sigfillset(&mask_all);
-    //while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+
     pid = waitpid(-1, &status, WNOHANG | WUNTRACED);
     sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
     if (WIFSTOPPED(status)) {
-        printf("Running WIFSTOPPED.\n");
         sigtstp_handler(sig);
     } else if (WIFSIGNALED(status)) {
         sigint_handler(sig);
-        printf("Running WIFSIGNALED.\n");
     } else if (WIFEXITED(status)) {
-        printf("Running WIFEXITED.\n");
-        /*
-        printf("Status: %d\n", status);
-        printf("Signal: %d\n", sig);
-
-        printf("PID: %d\n", pid);
-        if (sig == 20) {
-            sigtstp_handler(18);
-            break;
-        }
-        */
-
         deletejob(jobs, pid);
     }
     sigprocmask(SIG_SETMASK, &prev_all, NULL);
-
-    //printf("IN PID WHILE LOOP....\n");
-    //}
-
-    printf("Ending SIGCHLD_HANDLER.\n");
 
     return;
 }
@@ -445,7 +426,6 @@ void sigtstp_handler(int sig)
         }
     }
 
-    printf("Ending SIGTSTP_HANDLER.\n");
     return;
 }
 
